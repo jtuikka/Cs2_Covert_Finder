@@ -52,47 +52,63 @@ def load_items_from_file(file_path, wear_suffix, stattrak=False):
 
 def get_market_price(item_name):
     """
-    Fetch the lowest Steam Market price for a given item.
+    Fetch the lowest Steam Market price AND number of listings for a given item.
     Retries indefinitely on 429, non-200, network errors, or bad responses.
     """
-    url = "https://steamcommunity.com/market/priceoverview/"
-    params = {
+    # priceoverview for price
+    price_url = "https://steamcommunity.com/market/priceoverview/"
+    price_params = {
         "appid": APP_ID,
         "currency": CURRENCY,
         "market_hash_name": item_name
     }
 
+    # listing count endpoint
+    listing_url = f"https://steamcommunity.com/market/listings/{APP_ID}/{requests.utils.quote(item_name)}/render/?count=1&start=0"
+
     while True:
         try:
-            response = requests.get(url, params=params, timeout=15)
+            price_response = requests.get(price_url, params=price_params, timeout=15)
         except requests.RequestException as e:
             print(f"🌐 Network error for: {item_name} — {e}. Waiting 2s and retrying...")
             time.sleep(2)
             continue
 
-        if response.status_code == 429:
-            print(f"⚠️ Request failed (429) for: {item_name} — waiting 2 seconds and retrying...")
+        if price_response.status_code == 429:
+            print(f"⚠️ Request failed (429) for: {item_name} — waiting 2s and retrying...")
             time.sleep(2)
             continue
-
-        if response.status_code != 200:
-            print(f"⚠️ HTTP {response.status_code} for: {item_name} — waiting 2s and retrying...")
+        if price_response.status_code != 200:
+            print(f"⚠️ HTTP {price_response.status_code} for: {item_name} — waiting 2s and retrying...")
             time.sleep(2)
             continue
 
         try:
-            data = response.json()
+            price_data = price_response.json()
         except Exception:
-            print(f"⚠️ Invalid JSON response for: {item_name} — waiting 2s and retrying...")
+            print(f"⚠️ Invalid JSON for: {item_name} — waiting 2s and retrying...")
             time.sleep(2)
             continue
 
-        if not data.get("success"):
+        if not price_data.get("success"):
             print(f"⚠️ No data (success=false) for: {item_name} — waiting 2s and retrying...")
             time.sleep(2)
             continue
 
-        return data.get("lowest_price", "N/A")
+        lowest_price = price_data.get("lowest_price", "N/A")
+
+        # Now fetch number of active listings
+        try:
+            listing_response = requests.get(listing_url, timeout=15)
+            if listing_response.status_code == 200:
+                listing_json = listing_response.json()
+                total_count = listing_json.get("total_count", "N/A")
+            else:
+                total_count = "N/A"
+        except Exception:
+            total_count = "N/A"
+
+        return lowest_price, total_count
 
 
 def parse_price(price_str):
@@ -162,9 +178,9 @@ def main():
     print("\nFetching prices from Steam Market...\n")
 
     for name in items:
-        price = get_market_price(name)
-        results.append((name, price))
-        print(f"{name:70} -> {price}")
+        price, count = get_market_price(name)
+        results.append((name, price, count))
+        print(f"{name:70} -> {price}  |  Listings: {count}")
         time.sleep(REQUEST_DELAY)
 
     # Summary
@@ -172,8 +188,9 @@ def main():
     print("Covert Items - Price Summary")
     print("==============================\n")
 
-    for name, price in results:
-        print(f"{name:70} | {price}")
+    for name, price, count in results:
+        print(f"{name:70} | {price:>10} | Listings: {count}")
+
 
     print(f"\nTotal items checked: {len(results)}")
 
@@ -185,8 +202,8 @@ def main():
     print("💰 Top 10 Cheapest Items")
     print("==============================\n")
 
-    for name, price in sorted_results[:10]:
-        print(f"{name:70} | {price}")
+    for name, price, count in sorted_results[:10]:
+        print(f"{name:70} | {price:>10} | Listings: {count}")
 
 
 # ===============================
