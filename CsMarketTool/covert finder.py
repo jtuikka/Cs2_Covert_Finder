@@ -55,7 +55,16 @@ def get_market_price(item_name):
     Fetch the lowest Steam Market price AND number of listings for a given item.
     Retries indefinitely on 429, non-200, network errors, or bad responses.
     """
-    # priceoverview for price
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/127.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Referer": "https://steamcommunity.com/market/",
+    }
+
     price_url = "https://steamcommunity.com/market/priceoverview/"
     price_params = {
         "appid": APP_ID,
@@ -63,19 +72,18 @@ def get_market_price(item_name):
         "market_hash_name": item_name
     }
 
-    # listing count endpoint
     listing_url = f"https://steamcommunity.com/market/listings/{APP_ID}/{requests.utils.quote(item_name)}/render/?count=1&start=0"
 
     while True:
         try:
-            price_response = requests.get(price_url, params=price_params, timeout=15)
+            price_response = requests.get(price_url, params=price_params, headers=headers, timeout=15)
         except requests.RequestException as e:
             print(f"🌐 Network error for: {item_name} — {e}. Waiting 2s and retrying...")
             time.sleep(2)
             continue
 
         if price_response.status_code == 429:
-            print(f"⚠️ Request failed (429) for: {item_name} — waiting 2s and retrying...")
+            print(f"⚠️ Request failed (429) for: {item_name} — waiting 2 seconds and retrying...")
             time.sleep(2)
             continue
         if price_response.status_code != 200:
@@ -99,13 +107,22 @@ def get_market_price(item_name):
 
         # Now fetch number of active listings
         try:
-            listing_response = requests.get(listing_url, timeout=15)
+            listing_response = requests.get(listing_url, headers=headers, timeout=15)
             if listing_response.status_code == 200:
-                listing_json = listing_response.json()
-                total_count = listing_json.get("total_count", "N/A")
+                try:
+                    listing_json = listing_response.json()
+                    total_count = listing_json.get("total_count", None)
+                except ValueError:
+                    # Sometimes Steam returns HTML; try to extract count manually
+                    m = re.search(r'"total_count":(\d+)', listing_response.text)
+                    total_count = m.group(1) if m else "N/A"
             else:
                 total_count = "N/A"
         except Exception:
+            total_count = "N/A"
+
+        # If total_count is None or empty, make it 'N/A'
+        if not total_count:
             total_count = "N/A"
 
         return lowest_price, total_count
