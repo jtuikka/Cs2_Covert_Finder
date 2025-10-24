@@ -2,6 +2,7 @@ import requests
 import time
 import sys
 import re
+import random
 
 # Allow UTF-8 output on Windows
 sys.stdout.reconfigure(encoding="utf-8")
@@ -12,7 +13,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 APP_ID = 730        # Counter-Strike 2
 CURRENCY = 3        # 3 = Euro
-REQUEST_DELAY = 1.5 # seconds between API calls
+REQUEST_DELAY = 3.0 # seconds between API calls (increased to avoid cooldown)
 ITEM_FILE = "covert_items.txt"
 
 
@@ -53,7 +54,7 @@ def load_items_from_file(file_path, wear_suffix, stattrak=False):
 def get_market_price(item_name):
     """
     Fetch the lowest Steam Market price and number of active sell listings.
-    Uses priceoverview (for price) + item render page (for listings).
+    Uses only search/render endpoint to get both price and listing count in one request.
     Retries indefinitely on rate limits or failed requests.
     """
     headers = {
@@ -66,72 +67,67 @@ def get_market_price(item_name):
         "Referer": "https://steamcommunity.com/market/",
     }
 
-    price_url = "https://steamcommunity.com/market/priceoverview/"
-    price_params = {
-        "appid": APP_ID,
-        "currency": CURRENCY,
-        "market_hash_name": item_name
-    }
-
-    # Use search render endpoint to get sell_listings
+    # Use search render endpoint to get both price and sell_listings in one request
     render_url = "https://steamcommunity.com/market/search/render/"
     render_params = {
         "appid": APP_ID,
         "query": item_name,
-        "norender": 1
+        "norender": 1,
+        "currency": CURRENCY
     }
 
     while True:
-        # --- Get price ---
+        # --- Get price and listing count in one request ---
         try:
-            price_response = requests.get(price_url, params=price_params, headers=headers, timeout=15)
+            render_response = requests.get(render_url, params=render_params, headers=headers, timeout=15)
         except requests.RequestException as e:
             print(f"🌐 Network error for {item_name}: {e}. Retrying in 2s...")
             time.sleep(2)
             continue
 
-        if price_response.status_code == 429:
-            print(f"⚠️ Rate limited (429) for {item_name}. Waiting 2s...")
-            time.sleep(2)
+        if render_response.status_code == 429:
+            print(f"⚠️ Rate limited (429) for {item_name}. Waiting 10s...")
+            time.sleep(10)
             continue
-        if price_response.status_code != 200:
-            print(f"⚠️ HTTP {price_response.status_code} for {item_name}. Waiting 2s...")
-            time.sleep(2)
+        if render_response.status_code != 200:
+            print(f"⚠️ HTTP {render_response.status_code} for {item_name}. Waiting 5s...")
+            time.sleep(5)
             continue
 
-        try:
-            price_data = price_response.json()
-            lowest_price = price_data.get("lowest_price", "N/A")
-        except Exception:
-            lowest_price = "N/A"
-
-        # --- Get listing count ---
+        lowest_price = "N/A"
         sell_count = "N/A"
+        
         try:
-            render_response = requests.get(render_url, params=render_params, headers=headers, timeout=15)
-            if render_response.status_code == 200:
-                render_data = render_response.json()
-                # Check if we have results and the list is not empty
-                if render_data.get("success") and render_data.get("results") and len(render_data["results"]) > 0:
-                    # Get first result's sell_listings
-                    first_result = render_data["results"][0]
-                    sell_count = first_result.get("sell_listings", "N/A")
-                elif render_data.get("success") and render_data.get("total_count") == 0:
-                    # Item not found, but this is valid response
-                    sell_count = "0"
+            render_data = render_response.json()
+            
+            # Check if we have results and the list is not empty
+            if render_data.get("success") and render_data.get("results") and len(render_data["results"]) > 0:
+                # Find the exact match by hash_name
+                matching_result = None
+                for result in render_data["results"]:
+                    if result.get("hash_name") == item_name:
+                        matching_result = result
+                        break
+                
+                if matching_result:
+                    sell_count = matching_result.get("sell_listings", "N/A")
+                    lowest_price = matching_result.get("sell_price_text", "N/A")
+                else:
+                    # Item with exact name not found
+                    print(f"⚠️ Item not found on market: {item_name}")
+                    return "N/A", "0"
+            elif render_data.get("success") and render_data.get("total_count") == 0:
+                # Item not found, but this is valid response
+                print(f"⚠️ Item not found on market: {item_name}")
+                return "N/A", "0"
         except Exception as e:
-            print(f"⚠️ Error fetching listing count for {item_name}: {e}")
+            print(f"⚠️ Error parsing data for {item_name}: {e}")
 
-        # If both missing and item exists (not "0"), retry
+        # If both missing, retry
         if lowest_price == "N/A" and sell_count == "N/A":
             print(f"⚠️ No valid data for {item_name}. Retrying in 2s...")
             time.sleep(2)
             continue
-
-        # If item not found (sell_count is "0" and no price), return immediately
-        if sell_count == "0" and lowest_price == "N/A":
-            print(f"⚠️ Item not found on market: {item_name}")
-            return "N/A", "0"
 
         return lowest_price, sell_count
 
@@ -206,7 +202,9 @@ def main():
         price, count = get_market_price(name)
         results.append((name, price, count))
         print(f"{name:70} -> {price}  |  Listings: {count}")
-        time.sleep(REQUEST_DELAY)
+        # Random delay to appear more human-like and avoid rate limits
+        delay = REQUEST_DELAY + random.uniform(0.5, 2.0)
+        time.sleep(delay)
 
     # Summary
     print("\n==============================")
@@ -229,7 +227,7 @@ def main():
     for name, price, count in sorted_results[:10]:
         print(f"{name:70} | {price:>10} | Listings: {count}")
 
-
+    print("Total listings in Steam Market:", sum(int(c) for _, _, c in results))
 # ===============================
 # Entry Point
 # ===============================
