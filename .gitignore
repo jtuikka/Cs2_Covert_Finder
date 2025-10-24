@@ -1,0 +1,9 @@
+# Ignore generated market data files
+CsMarketTool/market_data/
+
+# Optional common Python ignores
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
