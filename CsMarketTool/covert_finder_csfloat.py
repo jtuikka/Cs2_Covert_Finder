@@ -147,7 +147,7 @@ def main():
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "Referer": "https://csfloat.com/",
         # ⚠️ Replace with your own valid cookies
-        "Cookie": "_gid=GA1.2.1979049140.1761229477; _gcl_au=1.1.984629146.1761229478; stripe_mid=4462fe5a-7fd2-4509-9cfd-82ebc004c3a764e374; session=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdGVhbV9pZCI6Ijc2NTYxMTk4ODc1NTI4ODU4Iiwibm9uY2UiOjAsImltcGVyc29uYXRlZCI6ZmFsc2UsImlzcyI6ImNzdGVjaCIsImV4cCI6MTc2MTY2MTc2N30.8mw-OtU9jPrDAl_QJ1QuxOotUcIFvJMdAtmw-G_ZaMo; _ga=GA1.2.668232667.1761229477; stripe_sid=b59e0868-65df-4500-afb8-e2c219fb25bb735784; _ga_3V4JQEGNYC=GS2.1.s1761244554$o2$g1$t1761244617$j60$l0$h0"
+        "Cookie": "COOKIE HERE"
     })
 
     # === Process items ===

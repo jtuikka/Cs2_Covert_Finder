@@ -52,14 +52,15 @@ def load_items_from_file(file_path, wear_suffix, stattrak=False):
 
 def get_market_price(item_name):
     """
-    Fetch the lowest Steam Market price AND number of listings for a given item.
-    Retries indefinitely on 429, non-200, network errors, or bad responses.
+    Fetch the lowest Steam Market price and number of active sell listings.
+    Uses priceoverview (for price) + item render page (for listings).
+    Retries indefinitely on rate limits or failed requests.
     """
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/127.0.0.0 Safari/537.36"
+            "Chrome/128.0.0.0 Safari/537.36"
         ),
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "Referer": "https://steamcommunity.com/market/",
@@ -72,60 +73,67 @@ def get_market_price(item_name):
         "market_hash_name": item_name
     }
 
-    listing_url = f"https://steamcommunity.com/market/listings/{APP_ID}/{requests.utils.quote(item_name)}/render/?count=1&start=0"
+    # Use search render endpoint to get sell_listings
+    render_url = "https://steamcommunity.com/market/search/render/"
+    render_params = {
+        "appid": APP_ID,
+        "query": item_name,
+        "norender": 1
+    }
 
     while True:
+        # --- Get price ---
         try:
             price_response = requests.get(price_url, params=price_params, headers=headers, timeout=15)
         except requests.RequestException as e:
-            print(f"🌐 Network error for: {item_name} — {e}. Waiting 2s and retrying...")
+            print(f"🌐 Network error for {item_name}: {e}. Retrying in 2s...")
             time.sleep(2)
             continue
 
         if price_response.status_code == 429:
-            print(f"⚠️ Request failed (429) for: {item_name} — waiting 2 seconds and retrying...")
+            print(f"⚠️ Rate limited (429) for {item_name}. Waiting 2s...")
             time.sleep(2)
             continue
         if price_response.status_code != 200:
-            print(f"⚠️ HTTP {price_response.status_code} for: {item_name} — waiting 2s and retrying...")
+            print(f"⚠️ HTTP {price_response.status_code} for {item_name}. Waiting 2s...")
             time.sleep(2)
             continue
 
         try:
             price_data = price_response.json()
+            lowest_price = price_data.get("lowest_price", "N/A")
         except Exception:
-            print(f"⚠️ Invalid JSON for: {item_name} — waiting 2s and retrying...")
-            time.sleep(2)
-            continue
+            lowest_price = "N/A"
 
-        if not price_data.get("success"):
-            print(f"⚠️ No data (success=false) for: {item_name} — waiting 2s and retrying...")
-            time.sleep(2)
-            continue
-
-        lowest_price = price_data.get("lowest_price", "N/A")
-
-        # Now fetch number of active listings
+        # --- Get listing count ---
+        sell_count = "N/A"
         try:
-            listing_response = requests.get(listing_url, headers=headers, timeout=15)
-            if listing_response.status_code == 200:
-                try:
-                    listing_json = listing_response.json()
-                    total_count = listing_json.get("total_count", None)
-                except ValueError:
-                    # Sometimes Steam returns HTML; try to extract count manually
-                    m = re.search(r'"total_count":(\d+)', listing_response.text)
-                    total_count = m.group(1) if m else "N/A"
-            else:
-                total_count = "N/A"
-        except Exception:
-            total_count = "N/A"
+            render_response = requests.get(render_url, params=render_params, headers=headers, timeout=15)
+            if render_response.status_code == 200:
+                render_data = render_response.json()
+                # Check if we have results and the list is not empty
+                if render_data.get("success") and render_data.get("results") and len(render_data["results"]) > 0:
+                    # Get first result's sell_listings
+                    first_result = render_data["results"][0]
+                    sell_count = first_result.get("sell_listings", "N/A")
+                elif render_data.get("success") and render_data.get("total_count") == 0:
+                    # Item not found, but this is valid response
+                    sell_count = "0"
+        except Exception as e:
+            print(f"⚠️ Error fetching listing count for {item_name}: {e}")
 
-        # If total_count is None or empty, make it 'N/A'
-        if not total_count:
-            total_count = "N/A"
+        # If both missing and item exists (not "0"), retry
+        if lowest_price == "N/A" and sell_count == "N/A":
+            print(f"⚠️ No valid data for {item_name}. Retrying in 2s...")
+            time.sleep(2)
+            continue
 
-        return lowest_price, total_count
+        # If item not found (sell_count is "0" and no price), return immediately
+        if sell_count == "0" and lowest_price == "N/A":
+            print(f"⚠️ Item not found on market: {item_name}")
+            return "N/A", "0"
+
+        return lowest_price, sell_count
 
 
 def parse_price(price_str):
@@ -207,7 +215,6 @@ def main():
 
     for name, price, count in results:
         print(f"{name:70} | {price:>10} | Listings: {count}")
-
 
     print(f"\nTotal items checked: {len(results)}")
 
